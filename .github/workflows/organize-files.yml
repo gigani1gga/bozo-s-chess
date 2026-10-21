@@ -1,105 +1,175 @@
-name: Organize incoming files
-
+name: Organize and Build
 on:
   push:
     branches: [main]
-    paths:
-      - "incoming/**"
-      - ".github/workflows/organize-files.yml"
   workflow_dispatch:
-
+permissions:
+  contents: write
+concurrency:
+  group: organize
+  cancel-in-progress: false
 jobs:
   organize:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install unzip tools
-        run: sudo apt-get update && sudo apt-get install -y unzip
-
-      - name: Organize files
-        shell: bash
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unzip, place files, delete duplicates
         run: |
-          set -euo pipefail
-
-          INCOMING="incoming"
-          OUTPUT="organized"
-
-          mkdir -p "$OUTPUT"
-
-          # Create category folders
-          mkdir -p "$OUTPUT/images" "$OUTPUT/documents" "$OUTPUT/archives" "$OUTPUT/other"
-
-          shopt -s nullglob
-          for file in "$INCOMING"/*; do
-            [ -f "$file" ] || continue
-
-            name="$(basename "$file")"
-            ext="${name##*.}"
-            ext_lower="${ext,,}"
-
-            case "$ext_lower" in
-              png|jpg|jpeg|gif|webp|svg|bmp|ico)
-                target="$OUTPUT/images"
-                ;;
-              pdf|txt|md|csv|json|xml|yaml|yml|html|css|js|ts|py|java|c|cpp|h|hpp|rs|go|php|rb|swift|kt|sql|sh|bat|ps1)
-                target="$OUTPUT/documents"
-                ;;
-              zip|apk|jar|war|ear|tar|gz|tgz|bz2|xz)
-                target="$OUTPUT/archives"
-                ;;
-              *)
-                target="$OUTPUT/other"
-                ;;
-            esac
-
-            mkdir -p "$target"
-            dest="$target/$name"
-
-            # avoid collisions
-            if [ -e "$dest" ]; then
-              base="${name%.*}"
-              suffix="${name##*.}"
-              i=1
-              while [ -e "$target/${base}_${i}.${suffix}" ]; do
-                i=$((i+1))
-              done
-              dest="$target/${base}_${i}.${suffix}"
-            fi
-
-            mv "$file" "$dest"
-
-            # unzip archives
-            case "${dest##*.}" in
-              zip|apk|jar|war|ear)
-                dir="${dest%.*}"
-                mkdir -p "$dir"
-                unzip -q "$dest" -d "$dir"
-                ;;
-              tar|gz|tgz|bz2|xz)
-                dir="${dest%.*}"
-                mkdir -p "$dir"
-                tar -xf "$dest" -C "$dir"
-                ;;
-            esac
-          done
-
-          echo "Files organized and extracted."
-
-      - name: Commit changes
-        shell: bash
+          python3 - <<'PY'
+          import os,re,shutil,hashlib,zipfile
+          from pathlib import Path
+          R=Path('.').resolve()
+          PROT={'.git','.github','node_modules','android','.unz'}
+          ORG={'www','stockfish','incoming','docs'}
+          CFG={'package.json','package-lock.json','capacitor.config.json','.gitignore','README.md','LICENSE'}
+          IMG={'.png','.jpg','.jpeg','.gif','.svg','.webp','.ico'}
+          DOC={'.md','.txt','.pdf','.docx'}
+          WEB={'.html','.htm','.css','.js','.mjs','.wasm'}
+          out=[]
+          def say(m):
+              print(m); out.append(m)
+          def files():
+              r=[]
+              for dp,dn,fn in os.walk(R):
+                  rel=Path(dp).relative_to(R)
+                  if rel==Path('.'): dn[:]=[d for d in dn if d not in PROT]
+                  for f in fn: r.append((rel/f))
+              return r
+          def put(src,dst):
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              if dst.exists(): dst.unlink()
+              shutil.move(str(src),str(dst))
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+              return h.hexdigest()
+          # 0. junk
+          for p in files():
+              if p.name in ('.DS_Store','Thumbs.db','desktop.ini'): (R/p).unlink(); say('deleted junk '+str(p))
+          for d in list(R.glob('**/__MACOSX')):
+              if d.is_dir() and not str(d.relative_to(R)).startswith(tuple(PROT)): shutil.rmtree(d); say('deleted junk '+d.name)
+          # 1. unzip (repeat for zips inside zips)
+          for _ in range(5):
+              zs=[p for p in files() if p.suffix.lower()=='.zip']
+              if not zs: break
+              for z in zs:
+                  tmp=R/'.unz'; shutil.rmtree(tmp,ignore_errors=True); tmp.mkdir()
+                  try:
+                      with zipfile.ZipFile(R/z) as zf:
+                          for m in zf.infolist():
+                              t=(tmp/m.filename).resolve()
+                              if tmp.resolve() in t.parents or t==tmp.resolve(): zf.extract(m,tmp)
+                  except Exception as e:
+                      say('could not unzip '+str(z)+': '+str(e)); shutil.rmtree(tmp,ignore_errors=True); continue
+                  base=R/'stockfish'/z.stem if 'stockfish' in z.name.lower() else R
+                  for dp,dn,fn in os.walk(tmp):
+                      for f in fn:
+                          s=Path(dp)/f; put(s,base/s.relative_to(tmp))
+                  shutil.rmtree(tmp,ignore_errors=True); (R/z).unlink(); say('unzipped '+str(z))
+          # 2. flatten wrapper folders such as my-project/www/...
+          for d in sorted(R.iterdir()):
+              if d.is_dir() and d.name not in PROT|ORG and not d.name.startswith('.'):
+                  if (d/'package.json').exists() or (d/'capacitor.config.json').exists() or (d/'www').is_dir():
+                      for f in [x for x in d.rglob('*') if x.is_file()]:
+                          rel=f.relative_to(d)
+                          if rel.parts[0]=='.github': continue
+                          put(f,R/rel)
+                      say('flattened folder '+d.name)
+          # 3. Stockfish web build -> www/stockfish.js + www/stockfish.wasm
+          if not (R/'www'/'stockfish.js').exists():
+              c=[p for p in files() if re.match(r'^stockfish.*\.js$',p.name,re.I) and p.parts[0]!='www']
+              c.sort(key=lambda p:(0 if 'lite' in p.name.lower() and 'single' in p.name.lower() else 1 if 'single' in p.name.lower() else 2,len(p.parts)))
+              if c:
+                  js=R/c[0]; (R/'www').mkdir(exist_ok=True); shutil.copy(js,R/'www'/'stockfish.js')
+                  w=js.with_suffix('.wasm')
+                  if w.exists(): shutil.copy(w,R/'www'/'stockfish.wasm')
+                  say('installed Stockfish from '+str(c[0]))
+          # 4. place every loose file in its correct folder
+          def target(p):
+              if p.parts[0] in ORG and len(p.parts)>1: return None
+              n,e=p.name,p.suffix.lower()
+              if re.match(r'^stockfish',n,re.I) and e in ('.js','.wasm'): return None
+              n=re.sub(r' \(\d+\)| - Copy| copy','',p.stem,flags=re.I)+p.suffix
+              if n in CFG: return Path(n)
+              if n.startswith('.'): return None
+              if e=='.apk': return Path('incoming')/n
+              if e in WEB: return Path('www')/n
+              if e in IMG: return Path('www/assets')/n
+              if e in DOC: return Path('docs')/n
+              if e in ('.yml','.yaml'): say('WARNING '+str(p)+' is a workflow file; GitHub does not let workflows move it. Put it in .github/workflows yourself.')
+              return None
+          for p in files():
+              t=target(p)
+              if t is None or t==p: continue
+              if (R/t).exists() and sha(R/t)==sha(R/p): (R/p).unlink(); say('removed duplicate '+str(p)); continue
+              put(R/p,R/t); say('moved '+str(p)+' -> '+str(t))
+          # 5. delete duplicate files (same content), keep the one in the best place
+          groups={}
+          for p in files():
+              if (R/p).stat().st_size: groups.setdefault((sha(R/p),p.name if p.name in CFG else '*'),[]).append(p)
+          for g in groups.values():
+              if len(g)<2: continue
+              g.sort(key=lambda p:(0 if (p.parts[0] in ORG or (len(p.parts)==1 and p.name in CFG)) else 1,1 if re.search(r' \(\d+\)|copy',p.name,re.I) else 0,len(p.parts),len(p.name),str(p)))
+              for p in g[1:]: (R/p).unlink(); say('deleted duplicate '+str(p)+' (kept '+str(g[0])+')')
+          # 6. remove empty folders, make sure .gitignore is sane
+          for dp,dn,fn in os.walk(R,topdown=False):
+              rel=Path(dp).relative_to(R)
+              if rel.parts and rel.parts[0] not in PROT and not dn and not fn: Path(dp).rmdir()
+          gi=R/'.gitignore'; cur=gi.read_text() if gi.exists() else ''
+          for l in ('node_modules','android','.unz'):
+              if l not in cur.split(): cur+=('' if cur.endswith('\n') or not cur else '\n')+l+'\n'
+          gi.write_text(cur)
+          with open(os.environ.get('GITHUB_STEP_SUMMARY','/dev/null'),'a') as f:
+              f.write('## Organizer\n'+('\n'.join('- '+m for m in out) or 'Everything was already organized.')+'\n')
+          PY
+      - name: Download Stockfish if none was provided
+        continue-on-error: true
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add .
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Organize incoming files"
-            git push
+          if [ ! -f www/stockfish.js ]; then
+            mkdir -p /tmp/sf && cd /tmp/sf && npm init -y >/dev/null && npm install stockfish
+            JS=$(find node_modules/stockfish -type f -name '*single*.js' | grep -i lite | head -n1 || true)
+            [ -z "$JS" ] && JS=$(find node_modules/stockfish -type f -name '*single*.js' | head -n1)
+            mkdir -p "$GITHUB_WORKSPACE/www"
+            cp "$JS" "$GITHUB_WORKSPACE/www/stockfish.js"
+            [ -f "${JS%.js}.wasm" ] && cp "${JS%.js}.wasm" "$GITHUB_WORKSPACE/www/stockfish.wasm"
           fi
+      - name: Save the organized files
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing to change"; else
+            git commit -m "Organize files"
+            git push || (git pull --rebase && git push)
+          fi
+  build:
+    needs: organize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Fill in missing app config
+        run: |
+          [ -f www/index.html ] || { echo "::error::www/index.html is missing. Upload index.html."; exit 1; }
+          [ -f package.json ] || echo '{"name":"chess-lab","version":"1.0.0","private":true,"dependencies":{"@capacitor/android":"^6.1.2","@capacitor/core":"^6.1.2"},"devDependencies":{"@capacitor/cli":"^6.1.2"}}' > package.json
+          [ -f capacitor.config.json ] || echo '{"appId":"com.example.chesslab","appName":"Chess Lab","webDir":"www"}' > capacitor.config.json
+      - run: npm install
+      - run: npx cap add android
+      - run: npx cap sync android
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess-lab-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
