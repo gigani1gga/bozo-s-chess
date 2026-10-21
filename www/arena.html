@@ -1,0 +1,191 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Stockfish arena</title>
+<style>
+:root{--bg:#f3f1ec;--fg:#1d2428;--mut:#667078;--card:#fff;--ln:#d9d5cc;--lt:#e8dcc0;--dk:#8aa07b;--acc:#2f5d62;--hl:rgba(240,200,60,.55);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14191b;--fg:#e6e9ea;--mut:#8d989d;--card:#1d2427;--ln:#2e373b;--lt:#b9ad8c;--dk:#5d7552;--acc:#79b6bc}}
+:root[data-theme="dark"]{--bg:#14191b;--fg:#e6e9ea;--mut:#8d989d;--card:#1d2427;--ln:#2e373b;--lt:#b9ad8c;--dk:#5d7552;--acc:#79b6bc}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px 14px 28px}
+h1{font:600 22px/1.2 Georgia,"Times New Roman",serif;margin:0 0 4px}
+p.s{margin:0 0 14px;color:var(--mut);font-size:13px}
+.w{color:#fff;text-shadow:0 0 2px #000,0 0 2px #000}.k{color:#101214;text-shadow:0 0 1px rgba(255,255,255,.4)}
+#bd{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr));width:100%;aspect-ratio:1/1;container-type:inline-size;border:2px solid var(--ln);border-radius:4px;overflow:hidden;user-select:none;-webkit-tap-highlight-color:transparent}
+#bd div{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;overflow:hidden;cursor:pointer;font-family:"Segoe UI Symbol","Noto Sans Symbols 2","Apple Symbols","DejaVu Sans",sans-serif;font-size:8.6cqw;line-height:1}
+#bd .l{background:var(--lt)}#bd .d{background:var(--dk)}
+#bd .h{box-shadow:inset 0 0 0 100px rgba(240,200,60,.4)}#bd .s{box-shadow:inset 0 0 0 100px rgba(240,200,60,.85)}
+#bd .m::after,#bd .x::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}
+#bd .m::after{width:30%;height:30%;background:rgba(20,30,25,.6);box-shadow:0 0 0 2px rgba(255,255,255,.5)}
+#bd .x::after{width:92%;height:92%;border:5px solid rgba(200,40,30,.85)}
+#bd.t{background:#000}#bd.t div{visibility:hidden}
+#pp{display:none}#pp button{font-size:18px}
+#cap{margin:8px 0 12px;font-size:13px;color:var(--mut);min-height:20px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+button{font:inherit;font-size:14px;padding:8px 14px;border-radius:8px;border:1px solid var(--ln);background:var(--card);color:var(--fg);cursor:pointer}
+button.on{background:var(--acc);color:var(--bg);border-color:var(--acc)}button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.c{background:var(--card);border:1px solid var(--ln);border-radius:8px;padding:10px 12px}
+.c b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.c span{font-size:12px;color:var(--mut)}
+.big{grid-column:1/-1}.big b{font-size:28px}
+.v{font-size:13px;margin:10px 0 0;color:var(--mut)}.v i{font-style:normal;color:var(--fg)}
+</style><style>input{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--ln);background:var(--card);color:var(--fg);width:100%}a.b{font:inherit;font-size:14px;padding:8px 14px;border-radius:8px;border:1px solid var(--ln);color:var(--fg);text-decoration:none}</style></head><body><main>
+<h1>Stockfish arena</h1>
+<p class="s">Our AI plays Stockfish and learns the strength of every position from Stockfish's own evaluation, plus the final result. When it scores well, Stockfish gets stronger.</p>
+<div class="row"><input id="sf" value="stockfish.js" aria-label="Stockfish worker file"></div>
+<div class="row"><button id="go" class="on">Start</button><button id="rs">Reset learning</button><a class="b" href="index.html">Back to lab</a></div>
+<div class="g" id="cards"></div>
+<p class="v">Learned piece values (pawn = 1): <i id="vals">–</i></p>
+<p class="v" id="note"></p>
+</main><script>
+function engineFactory(){
+const B=new Int8Array(64),KS=new Int8Array(2),NF=198,MAXP=100;let S=1,CS=15,EP=-1,HM=0,sp=0;
+const KN=[],KI=[],RY=[],CEN=new Float32Array(64),CM=new Int8Array(64).fill(15),CT=new Float32Array(832*NF);
+const US=new Int32Array(64),M1=new Int32Array(512),M2=new Int32Array(512),L=new Int32Array(512),LS=new Float64Array(512),VW=new Float64Array(840),VB=new Float64Array(840),OA=new Uint8Array(64),MA=new Uint8Array(64),PN=new Uint8Array(64),DS=new Uint8Array(64),DC=new Uint8Array(64),TM=[0,1,2,4,8,12,0],TV=new Float64Array(MAXP),BSB=new Int8Array(MAXP*64),MVB=new Int32Array(MAXP),HS=[];
+const D=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+CM[60]=12;CM[63]=14;CM[56]=13;CM[4]=3;CM[7]=11;CM[0]=7;
+for(let s=0;s<64;s++){const r=s>>3,f=s&7;KN[s]=[];KI[s]=[];RY[s]=[];
+CEN[s]=(3.5-Math.max(Math.abs(r-3.5),Math.abs(f-3.5)))/3;
+for(const[a,b]of[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]){const R=r+a,F=f+b;if(R>=0&&R<8&&F>=0&&F<8)KN[s].push(R*8+F)}
+D.forEach(([a,b])=>{const y=[];let R=r+a,F=f+b;while(R>=0&&R<8&&F>=0&&F<8){y.push(R*8+F);R+=a;F+=b}RY[s].push(y);if(y.length)KI[s].push(y[0])})}
+/* 198 parameters: per piece a left-right folded 8x4 table (32) plus 6 material values; score = sum of sign*(material+table) */
+const OW=new Int8Array(128);for(let s=0;s<64;s++){const r=s>>3,f=s&7,fo=f>3?7-f:f;OW[s]=r*4+fo;OW[64+s]=(7-r)*4+fo}
+const Z=[];for(let i=0;i<832;i++)Z.push((Math.random()*4294967296)|0);
+function reset(){const k=[4,2,3,5,6,3,2,4];B.fill(0);for(let f=0;f<8;f++){B[f]=-k[f];B[8+f]=-1;B[48+f]=1;B[56+f]=k[f]}S=1;CS=15;EP=-1;HM=0;sp=0;KS[0]=60;KS[1]=4}
+function att(sq,by){
+for(let i=0,l=KN[sq];i<l.length;i++)if(B[l[i]]===2*by)return true;
+for(let i=0,l=KI[sq];i<l.length;i++)if(B[l[i]]===6*by)return true;
+const r=sq>>3,f=sq&7,pr=r+by;
+if(pr>=0&&pr<8){if(f>0&&B[pr*8+f-1]===by)return true;if(f<7&&B[pr*8+f+1]===by)return true}
+for(let i=0;i<8;i++){const R=RY[sq][i];for(let j=0;j<R.length;j++){const p=B[R[j]];if(p){const q=p*by;if(q>0&&(q===5||(i<4?q===4:q===3)))return true;break}}}
+return false}
+function gen(buf){let n=0;const s=S;
+for(let sq=0;sq<64;sq++){const p=B[sq]*s;if(p<=0)continue;const r=sq>>3,f=sq&7;
+if(p===1){const d=-8*s,t=sq+d,pr=(t>>3)===(s===1?0:7);
+if(!B[t]){if(pr){for(let q=2;q<6;q++)buf[n++]=sq|t<<6|q<<12}else{buf[n++]=sq|t<<6;if(r===(s===1?6:1)&&!B[t+d])buf[n++]=sq|(t+d)<<6}}
+for(let c=-1;c<2;c+=2){const ff=f+c;if(ff<0||ff>7)continue;const to=t+c;
+if(B[to]*s<0){if(pr){for(let q=2;q<6;q++)buf[n++]=sq|to<<6|q<<12}else buf[n++]=sq|to<<6}else if(to===EP&&!B[to])buf[n++]=sq|to<<6|1<<15}}
+else if(p===2||p===6){const l=p===2?KN[sq]:KI[sq];for(let i=0;i<l.length;i++){const t=l[i];if(B[t]*s<=0)buf[n++]=sq|t<<6}}
+else{const a=p===3?4:0,b=p===4?4:8;for(let i=a;i<b;i++){const R=RY[sq][i];for(let j=0;j<R.length;j++){const t=R[j],x=B[t]*s;if(x>0)break;buf[n++]=sq|t<<6;if(x)break}}}}
+if(s===1){if(CS&1&&!B[61]&&!B[62]&&!att(60,-1)&&!att(61,-1)&&!att(62,-1))buf[n++]=60|62<<6|2<<15;
+if(CS&2&&!B[59]&&!B[58]&&!B[57]&&!att(60,-1)&&!att(59,-1)&&!att(58,-1))buf[n++]=60|58<<6|2<<15}
+else{if(CS&4&&!B[5]&&!B[6]&&!att(4,1)&&!att(5,1)&&!att(6,1))buf[n++]=4|6<<6|2<<15;
+if(CS&8&&!B[3]&&!B[2]&&!B[1]&&!att(4,1)&&!att(3,1)&&!att(2,1))buf[n++]=4|2<<6|2<<15}
+return n}
+function make(m){const f=m&63,t=(m>>6)&63,pr=(m>>12)&7,fl=m>>15,p=B[f],o=sp;sp+=7;
+US[o]=B[t];US[o+1]=CS;US[o+2]=EP;US[o+3]=HM;US[o+4]=p;US[o+5]=S;US[o+6]=KS[0]|KS[1]<<8;
+const ap=p<0?-p:p;HM=(ap===1||B[t])?0:HM+1;B[t]=pr?pr*S:p;B[f]=0;
+if(ap===6)KS[S===1?0:1]=t;
+if(fl&1)B[t+8*S]=0;
+if(fl&2){if(t>f){B[f+1]=B[f+3];B[f+3]=0}else{B[f-1]=B[f-4];B[f-4]=0}}
+EP=(ap===1&&(t-f===16||f-t===16))?(f+t)>>1:-1;CS&=CM[f]&CM[t];S=-S}
+function unmake(m){const f=m&63,t=(m>>6)&63,fl=m>>15;sp-=7;const o=sp;
+S=US[o+5];B[f]=US[o+4];B[t]=US[o];CS=US[o+1];EP=US[o+2];HM=US[o+3];const k=US[o+6];KS[0]=k&255;KS[1]=k>>8;
+if(fl&1)B[t+8*S]=-S;
+if(fl&2){if(t>f){B[f+3]=B[f+1];B[f+1]=0}else{B[f-4]=B[f-1];B[f-1]=0}}}
+function hasLegal(){const s=S,n=gen(M2);for(let i=0;i<n;i++){const m=M2[i];make(m);const ok=!att(KS[s===1?0:1],-s);unmake(m);if(ok)return true}return false}
+function mkV(w,V){for(let q=1;q<6;q++)V[832+q]=w[191+q];for(let p=-6;p<=6;p++){if(!p)continue;const a=p>0?1:-1,q=a*p,m=q<6?w[191+q]:0;for(let s=0;s<64;s++)V[(p+6)*64+s]=a*(w[(q-1)*32+OW[a>0?s:64+s]]+m)}}
+const cl=x=>x>3?3:x<-3?-3:x;
+function sc(w,BS,o){let s=0;for(let i=0;i<64;i++){const p=BS[o+i];if(!p)continue;const a=p>0?1:-1,q=a*p;s+=a*(w[(q-1)*32+OW[a>0?i:64+i]]+(q<6?w[191+q]:0))}return s}
+/* TD(lambda): each position is pulled toward a blend of the next position's value and the final result */
+function train(w,g,lr,lam){const n=g.plies,BS=g.BS,v=TV;if(!n)return;
+for(let t=0;t<n;t++)v[t]=Math.tanh(sc(w,BS,t*64));
+let T=g.z;for(let t=n-1;t>=0;t--){if(t<n-1)T=(1-lam)*v[t+1]+lam*T;
+const e=(T-v[t])*(1-v[t]*v[t])*lr,o=t*64;
+for(let i=0;i<64;i++){const p=BS[o+i];if(!p)continue;const a=p>0?1:-1,q=a*p,k=(q-1)*32+OW[a>0?i:64+i],d=e*a;w[k]=cl(w[k]+d);if(q<6){const j=191+q;w[j]=cl(w[j]+d)}}}}
+function pv(w,q){let s=0;for(let i=0;i<32;i++)s+=w[(q-1)*32+i];return s/32+(q<6?w[191+q]:0)}
+/* one pass: legality, score change from the lookup table (no feature scan), mate-in-1 */
+/* attack maps: which squares side sd attacks (or defends) */
+function amap(M,sd){M.fill(0);for(let q=0;q<64;q++){const p=B[q]*sd;if(p<=0)continue;
+if(p===1){const t=(q>>3)-sd,f=q&7;if(t>=0&&t<8){if(f>0)M[t*8+f-1]=1;if(f<7)M[t*8+f+1]=1}}
+else if(p===2){for(const t of KN[q])M[t]=1}else if(p===6){for(const t of KI[q])M[t]=1}
+else{const a=p===3?4:0,b=p===4?4:8;for(let i=a;i<b;i++){const R=RY[q][i];for(let j=0;j<R.length;j++){const t=R[j];M[t]=1;if(B[t])break}}}}}
+/* pieces of colour fr that are pinned to the king on q by a slider of colour sl (fr=own, sl=enemy: pins; sl=own, king=enemy: discovered checks) */
+function pins(q,fr,sl,M){M.fill(0);for(let i=0;i<8;i++){const R=RY[q][i];let x=-1;for(let j=0;j<R.length;j++){const t=R[j],p=B[t];if(!p)continue;if(x<0){if(p*fr>0&&p*p<36)x=t;else break}else{const a=p*sl;if(a>0&&(a===5||(i<4?a===4:a===3)))M[x]=1;break}}}}
+/* squares from which a piece would directly check the king on q */
+function cks(q,s){DC.fill(0);for(const t of KN[q])DC[t]|=2;const r=(q>>3)+s,f=q&7;if(r>=0&&r<8){if(f>0)DC[r*8+f-1]|=1;if(f<7)DC[r*8+f+1]|=1}
+for(let i=0;i<8;i++){const R=RY[q][i];for(let j=0;j<R.length;j++){const t=R[j];DC[t]|=i<4?8:4;if(B[t])break}}}
+/* one pass. Make/unmake and attack tests run only when a move could matter (king in check, king/pinned piece, possible check given).
+   Hanging pieces are priced with the engine's own learned material values. */
+function pick(V,eps){const s=S,ks=s===1?0:1,n=gen(M1),kq=KS[ks],oq=KS[1-ks],chk=att(kq,-s);amap(OA,-s);amap(MA,s);pins(kq,s,-s,PN);pins(oq,s,s,DS);cks(oq,s);let c=0,best=-1e9,bi=0;
+for(let i=0;i<n;i++){const m=M1[i],f=m&63,t=(m>>6)&63,fl=m>>15,pr=(m>>12)&7,p=B[f],cp=B[t],ap=p*s;
+let d=V[((pr?pr*s:p)+6)*64+t]-V[(p+6)*64+f]-V[(cp+6)*64+t];
+if(fl&1)d-=V[(6-s)*64+t+8*s];
+if(fl&2){const rf=t>f?f+3:f-4,rt=t>f?f+1:f-1,b=(4*s+6)*64;d+=V[b+rt]-V[b+rf]}
+let v=s*d+Math.random()*.02;
+if(ap<6){const a=V[832+ap];if(OA[t])v-=MA[t]?Math.max(0,a-V[832+(cp<0?-cp:cp)])*.5:a;if(OA[f]&&!MA[f])v+=a}
+const full=chk||ap===6||fl||PN[f],gc=fl||DS[f]||(DC[t]&TM[pr||ap]);
+if(full||gc){make(m);
+if(full&&att(KS[ks],-s)){unmake(m);continue}
+if(gc&&att(KS[1-ks],s)&&!hasLegal())v=1e3;
+unmake(m)}
+L[c]=m;LS[c]=v;if(v>best){best=v;bi=c}c++}
+if(!c)return -1;
+return Math.random()<eps?L[(Math.random()*c)|0]:L[bi]}
+function hash(){let h=(S===1?0:123456789)^(CS*40503);for(let s=0;s<64;s++)if(B[s])h^=Z[(B[s]+6)*64+s];return h}
+function insuf(){let n=0;for(let s=0;s<64;s++){const q=Math.abs(B[s]);if(q===1||q===4||q===5)return false;if(q===2||q===3)n++}return n<2}
+function play(wW,wB,eW,eB){reset();mkV(wW,VW);mkV(wB,VB);const hs=HS,mv=MVB,BS=BSB;hs.length=0;let z=0,mate=false,np=0;
+for(let ply=0;ply<MAXP;ply++){
+const m=pick(S===1?VW:VB,ply<4?.6:(S===1?eW:eB));
+if(m<0){if(att(KS[S===1?0:1],-S)){z=-S;mate=true}break}
+make(m);sp-=7;mv[np++]=m;BS.set(B,ply*64);
+const h=hash();hs.push(h);
+if(HM>=100||insuf())break;
+let c=0;for(let i=hs.length-1;i>=0&&i>=hs.length-HM-1;i-=2)if(hs[i]===h)c++;
+if(c>=3)break;
+if(ply===MAXP-1){let d=0;const val=[0,1,3,3,5,9,0];for(let i=0;i<64;i++)d+=Math.sign(B[i])*val[Math.abs(B[i])];z=Math.tanh(.25*d)*.5}}
+return{z,mate,moves:mv,BS,plies:np}}
+return{fen(){let s="";for(let r=0;r<8;r++){let n=0;for(let f=0;f<8;f++){const p=B[r*8+f];if(!p){n++;continue}if(n){s+=n;n=0}const c="pnbrqk"[(p<0?-p:p)-1];s+=p>0?c.toUpperCase():c}if(n)s+=n;if(r<7)s+="/"}
+return s+(S===1?" w ":" b ")+((CS&1?"K":"")+(CS&2?"Q":"")+(CS&4?"k":"")+(CS&8?"q":"")||"-")+" "+(EP>=0?"abcdefgh"[EP&7]+(8-(EP>>3)):"-")+" "+HM+" 1"},
+trainT(w,BS,n,tg,lr){let er=0;for(let t=0;t<n;t++){const v=Math.tanh(sc(w,BS,t*64)),x=tg[t]-v;er+=x*x;const e=x*(1-v*v)*lr,o=t*64;
+for(let i=0;i<64;i++){const p=BS[o+i];if(!p)continue;const a=p>0?1:-1,q=a*p,k=(q-1)*32+OW[a>0?i:64+i],d=e*a;w[k]=cl(w[k]+d);if(q<6){const j=191+q;w[j]=cl(w[j]+d)}}}return n?er/n:0},
+B,NF,reset,make:m=>{make(m);sp-=7},play,train,pv,get S(){return S},
+moves(){const s=S,n=gen(M1),o=[];for(let i=0;i<n;i++){const m=M1[i];make(m);if(!att(KS[s===1?0:1],-s))o.push(m);unmake(m)}return o},
+ai(w,e){mkV(w,VW);return pick(VW,e)},
+chk(){return att(KS[S===1?0:1],-S)},
+status(hs){const h=hash();hs.push(h);if(!hasLegal())return att(KS[S===1?0:1],-S)?(S===1?"Black":"White")+" wins by checkmate":"Stalemate";if(HM>=100||insuf())return"Draw";let c=0;for(let i=hs.length-1;i>=0&&i>=hs.length-HM-1;i-=2)if(hs[i]===h)c++;return c>=3?"Draw by repetition":""}}}
+
+
+const E0=engineFactory(),NF=E0.NF,$=id=>document.getElementById(id),MS=30,LR=.003,K=Math.max(1,Math.min(4,(navigator.hardwareConcurrency||4)>>1)),fl="abcdefgh";
+const rnd=()=>Array.from({length:NF},(_,i)=>i>191?.05:(Math.random()-.5)*.02);
+let W=(()=>{try{const x=JSON.parse(localStorage.getItem("sfW"));if(x&&x.length===NF)return x}catch(e){}return rnd()})();
+let run=false,lvl=0,st={g:0,w:0,d:0,l:0,pos:0},recent=[],last=0,err=.5,sfs=[],busy=[];
+const save=()=>{try{localStorage.setItem("sfW",JSON.stringify(W))}catch(e){}};
+const note=t=>$("note").textContent=t;
+function mk(path){const w=new Worker(path),o={};
+w.onmessage=e=>{const l=typeof e.data==="string"?e.data:"";
+if(l==="uciok")w.postMessage("isready");
+else if(l==="readyok"&&o.rdy){const r=o.rdy;o.rdy=null;r()}
+else if(l.startsWith("info")&&l.includes(" score ")){const m=l.match(/score (cp|mate) (-?\d+)/);if(m)o.cp=m[1]==="cp"?+m[2]:(+m[2]>0?1:-1)*10000}
+else if(l.startsWith("bestmove")&&o.cb){const c=o.cb;o.cb=null;c({mv:l.split(" ")[1],cp:o.cp||0})}};
+w.onerror=()=>{note("Could not load "+path+". Put the Stockfish JS file (and its .wasm) in the same folder as arena.html.");run=false;$("go").textContent="Start"};
+o.init=()=>new Promise(r=>{o.rdy=r;w.postMessage("uci")});
+o.set=(n,v)=>w.postMessage("setoption name "+n+" value "+v);
+o.ask=fen=>new Promise(r=>{o.cb=r;o.cp=0;w.postMessage("position fen "+fen);w.postMessage("go movetime "+MS)});
+return o}
+function fromUci(e,u){if(!u||u.length<4)return -1;const f=(8-u[1])*8+fl.indexOf(u[0]),t=(8-u[3])*8+fl.indexOf(u[2]),pc=u[4]?{n:2,b:3,r:4,q:5}[u[4]]:0;
+const m=e.moves().find(m=>(m&63)===f&&((m>>6)&63)===t&&((m>>12)&7)===pc);return m===undefined?-1:m}
+async function slot(k){if(busy[k])return;busy[k]=true;const e=engineFactory(),o=sfs[k];
+try{while(run){
+const ours=Math.random()<.5?1:-1,hist=[],sn=[],tg=[];e.reset();let res="";
+for(let ply=0;ply<160;ply++){res=e.status(hist);if(res)break;
+const turn=e.S,r=await o.ask(e.fen());if(!run)return;
+sn.push(Int8Array.from(e.B));tg.push(Math.tanh(r.cp/300)*turn);
+let m;if(ply<4){const l=e.moves();m=l[(Math.random()*l.length)|0]}else m=turn===ours?e.ai(W,.03):fromUci(e,r.mv);
+if(m==null||m<0)break;e.make(m)}
+const win=res.includes("checkmate")?(res[0]==="W"?1:-1):0;
+sn.push(Int8Array.from(e.B));tg.push(win);
+const n=sn.length,BS=new Int8Array(n*64);sn.forEach((b,i)=>BS.set(b,i*64));
+err=.95*err+.05*e.trainT(W,BS,n,tg,LR);st.pos+=n;
+const sc=win*ours;st.g++;sc>0?st.w++:sc<0?st.l++:st.d++;recent.push(sc);
+if(recent.length>=20){last=recent.reduce((x,y)=>x+y)/20;recent=[];if(last>.2&&lvl<20){lvl++;sfs.forEach(s=>s.set("Skill Level",lvl))}}
+if(st.g%10===0)save()}}finally{busy[k]=false}}
+async function start(){if(run)return;run=true;$("go").textContent="Pause";note("");
+if(!sfs.length){try{for(let k=0;k<K;k++){const o=mk($("sf").value);sfs.push(o);await o.init();o.set("Skill Level",lvl)}}catch(e){note("Stockfish failed to start.");run=false;$("go").textContent="Start";sfs=[];return}}
+for(let k=0;k<K;k++)slot(k)}
+$("go").onclick=()=>{if(run){run=false;$("go").textContent="Start"}else start()};
+$("rs").onclick=()=>{W=rnd();st={g:0,w:0,d:0,l:0,pos:0};recent=[];last=0;err=.5;save()};
+const C=[["g","games vs Stockfish"],["wdl","our AI: wins / draws / losses"],["lv","Stockfish skill level (0 to 20)"],["rc","our score, last 20 games (-1 to 1)"],["er","eval error vs Stockfish (lower is better)"],["ps","positions learned from"]];
+$("cards").innerHTML=C.map(([i,t])=>`<div class="c"><b id="${i}">0</b><span>${t}</span></div>`).join("");
+setInterval(()=>{$("g").textContent=st.g;$("wdl").textContent=st.w+" / "+st.d+" / "+st.l;$("lv").textContent=lvl;$("rc").textContent=last.toFixed(2);$("er").textContent=err.toFixed(3);$("ps").textContent=st.pos.toLocaleString();
+const p=E0.pv(W,1);$("vals").textContent=p<.02?"still discovering what a pawn is worth":"knight "+(E0.pv(W,2)/p).toFixed(1)+", bishop "+(E0.pv(W,3)/p).toFixed(1)+", rook "+(E0.pv(W,4)/p).toFixed(1)+", queen "+(E0.pv(W,5)/p).toFixed(1)},1000);
+
+</script></body></html>
