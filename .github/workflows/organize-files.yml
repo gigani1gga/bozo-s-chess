@@ -1,0 +1,105 @@
+name: Organize incoming files
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "incoming/**"
+      - ".github/workflows/organize-files.yml"
+  workflow_dispatch:
+
+jobs:
+  organize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install unzip tools
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: Organize files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INCOMING="incoming"
+          OUTPUT="organized"
+
+          mkdir -p "$OUTPUT"
+
+          # Create category folders
+          mkdir -p "$OUTPUT/images" "$OUTPUT/documents" "$OUTPUT/archives" "$OUTPUT/other"
+
+          shopt -s nullglob
+          for file in "$INCOMING"/*; do
+            [ -f "$file" ] || continue
+
+            name="$(basename "$file")"
+            ext="${name##*.}"
+            ext_lower="${ext,,}"
+
+            case "$ext_lower" in
+              png|jpg|jpeg|gif|webp|svg|bmp|ico)
+                target="$OUTPUT/images"
+                ;;
+              pdf|txt|md|csv|json|xml|yaml|yml|html|css|js|ts|py|java|c|cpp|h|hpp|rs|go|php|rb|swift|kt|sql|sh|bat|ps1)
+                target="$OUTPUT/documents"
+                ;;
+              zip|apk|jar|war|ear|tar|gz|tgz|bz2|xz)
+                target="$OUTPUT/archives"
+                ;;
+              *)
+                target="$OUTPUT/other"
+                ;;
+            esac
+
+            mkdir -p "$target"
+            dest="$target/$name"
+
+            # avoid collisions
+            if [ -e "$dest" ]; then
+              base="${name%.*}"
+              suffix="${name##*.}"
+              i=1
+              while [ -e "$target/${base}_${i}.${suffix}" ]; do
+                i=$((i+1))
+              done
+              dest="$target/${base}_${i}.${suffix}"
+            fi
+
+            mv "$file" "$dest"
+
+            # unzip archives
+            case "${dest##*.}" in
+              zip|apk|jar|war|ear)
+                dir="${dest%.*}"
+                mkdir -p "$dir"
+                unzip -q "$dest" -d "$dir"
+                ;;
+              tar|gz|tgz|bz2|xz)
+                dir="${dest%.*}"
+                mkdir -p "$dir"
+                tar -xf "$dest" -C "$dir"
+                ;;
+            esac
+          done
+
+          echo "Files organized and extracted."
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Organize incoming files"
+            git push
+          fi
