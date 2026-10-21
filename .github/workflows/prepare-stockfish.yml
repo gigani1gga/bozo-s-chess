@@ -1,0 +1,42 @@
+name: Prepare Stockfish
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "incoming/**"
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unzip and organize Stockfish
+        run: |
+          shopt -s nullglob
+          mkdir -p tmp www stockfish
+          for z in incoming/*.zip; do unzip -oq "$z" -d tmp/unz; done
+          JS=""
+          if [ -d tmp/unz ]; then
+            JS=$(find tmp/unz -type f -name '*.js' | grep -i stockfish | grep -iv worker | head -n1 || true)
+            mkdir -p stockfish/native && cp -r tmp/unz/. stockfish/native/
+          fi
+          if [ -z "$JS" ]; then
+            echo "No web (JS/WASM) build in the upload, fetching one from npm"
+            npm install --no-save stockfish
+            JS=$(find node_modules/stockfish -type f -name '*single*.js' | grep -i lite | head -n1 || true)
+            [ -z "$JS" ] && JS=$(find node_modules/stockfish -type f -name '*single*.js' | head -n1 || true)
+          fi
+          [ -z "$JS" ] && { echo "No Stockfish JS found"; exit 1; }
+          cp "$JS" www/stockfish.js
+          [ -f "${JS%.js}.wasm" ] && cp "${JS%.js}.wasm" www/stockfish.wasm
+          ls -la www
+      - name: Commit result
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add www stockfish
+          git diff --cached --quiet || (git commit -m "Prepare Stockfish" && git push)
