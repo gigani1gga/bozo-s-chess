@@ -1,0 +1,39 @@
+name: Unpack APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "incoming/*.apk"
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip and organize
+        run: |
+          shopt -s nullglob
+          mkdir -p out
+          apks=(incoming/*.apk)
+          [ ${#apks[@]} -eq 0 ] && { echo "Put an .apk file in the incoming folder"; exit 1; }
+          for a in "${apks[@]}"; do
+            n=$(basename "$a" .apk); raw=tmp/$n; dst=out/$n
+            mkdir -p "$raw" "$dst"/{native-libs,assets,dex,resources,manifest,signing,other}
+            unzip -oq "$a" -d "$raw"
+            [ -d "$raw/lib" ] && cp -r "$raw/lib/." "$dst/native-libs/"
+            [ -d "$raw/assets" ] && cp -r "$raw/assets/." "$dst/assets/"
+            cp "$raw"/*.dex "$dst/dex/" 2>/dev/null || true
+            [ -d "$raw/res" ] && cp -r "$raw/res/." "$dst/resources/"
+            cp "$raw"/resources.arsc "$dst/resources/" 2>/dev/null || true
+            cp "$raw"/AndroidManifest.xml "$dst/manifest/" 2>/dev/null || true
+            [ -d "$raw/META-INF" ] && cp -r "$raw/META-INF/." "$dst/signing/"
+            find "$raw" -maxdepth 1 -type f ! -name '*.dex' ! -name resources.arsc ! -name AndroidManifest.xml -exec cp {} "$dst/other/" \;
+            {
+              echo "APK: $n"; echo; echo "Architectures:"; ls "$dst/native-libs" 2>/dev/null
+              echo; echo "Largest files:"; find "$raw" -type f -printf '%s %P\n' | sort -nr | head -n 15
+            } > "$dst/SUMMARY.txt"
+            cat "$dst/SUMMARY.txt"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-organized
+          path: out
