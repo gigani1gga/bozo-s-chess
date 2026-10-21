@@ -1,0 +1,2 @@
+mkdir -p extracted
+unzip chess-lab-apk.zip -d extracted
